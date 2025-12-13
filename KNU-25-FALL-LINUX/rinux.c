@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 #define N 10
-#define DEFAULT_TQ 10
+#define DEFAULT_TQ 3
 
 typedef enum {
     STATE_READY,
@@ -36,7 +36,7 @@ void child_process_logic(int id, int read_fd, int write_fd) {
     srand(time(NULL) ^ getpid());
     int cpu_burst = (rand() % 10) + 1;
     int cmd;
-    int response; 
+    int report[2]; 
 
     while (1) {
         read(read_fd, &cmd, sizeof(int));
@@ -45,23 +45,28 @@ void child_process_logic(int id, int read_fd, int write_fd) {
 
         if (cpu_burst <= 0) {
             if (rand() % 2 == 0) {
-                response = 2; 
-                write(write_fd, &response, sizeof(int));
+                report[0] = 2; 
+                report[1] = cpu_burst;
+                write(write_fd, report, sizeof(report));
                 cpu_burst = (rand() % 10) + 1;
             } else {
-                response = 3; 
-                write(write_fd, &response, sizeof(int));
+                report[0] = 3; 
+                report[1] = 0;
+                write(write_fd, report, sizeof(report));
                 exit(0);
             }
         } else {
-            response = 1; 
-            write(write_fd, &response, sizeof(int));
+            report[0] = 1; 
+            report[1] = cpu_burst;
+            write(write_fd, report, sizeof(report));
         }
     }
 }
 
 int main() {
     srand(time(NULL));
+
+    printf("=== OS 스케줄링 시뮬레이션 시작 (설정된 타임 퀀텀: %d) ===\n", DEFAULT_TQ);
 
     for (int i = 0; i < N; i++) {
         if (pipe(pcb_table[i].fd_p2c) == -1 || pipe(pcb_table[i].fd_c2p) == -1) {
@@ -157,11 +162,14 @@ int main() {
         
         pcb_table[target_idx].remaining_tq--;
         
-        int response;
-        read(pcb_table[target_idx].fd_c2p[0], &response, sizeof(int));
+        int report[2];
+        read(pcb_table[target_idx].fd_c2p[0], report, sizeof(report));
+        
+        int response = report[0];
+        int rem_burst = report[1];
 
         if (response == 3) {
-            printf("프로세스 %d 종료됨\n", target_idx);
+            printf("프로세스 %d 종료됨 (남은 버스트: 0)\n", target_idx);
             pcb_table[target_idx].state = STATE_DONE;
             pcb_table[target_idx].finish_time = global_time;
             active_processes--;
@@ -170,9 +178,11 @@ int main() {
             int wait_time = (rand() % 5) + 1;
             pcb_table[target_idx].state = STATE_SLEEP;
             pcb_table[target_idx].io_wait_time = wait_time;
-            printf("프로세스 %d I/O 요청 (대기시간: %d, 남은 TQ: %d)\n", target_idx, wait_time, pcb_table[target_idx].remaining_tq);
+            printf("프로세스 %d I/O 요청 (대기시간: %d, 남은 TQ: %d, 남은 버스트: %d)\n", 
+                   target_idx, wait_time, pcb_table[target_idx].remaining_tq, rem_burst);
         } else {
-            printf("프로세스 %d 실행 중 (남은 TQ: %d)\n", target_idx, pcb_table[target_idx].remaining_tq);
+            printf("프로세스 %d 실행 중 (남은 TQ: %d, 남은 버스트: %d)\n", 
+                   target_idx, pcb_table[target_idx].remaining_tq, rem_burst);
         }
 
         if (pcb_table[target_idx].state == STATE_READY && pcb_table[target_idx].remaining_tq == 0) {
